@@ -2,27 +2,37 @@ import os
 import threading
 import tkinter as tk
 from ctypes import windll
+import configparser
+from shutil import copyfile
+import win32con
+import win32api
+try:
+    import winxpgui as win32gui
+except ImportError:
+    import win32gui
+
 
 import discord
 
 import SysTrayIcon
 from Dialog import LoginDialog
 
-
-GWL_EXSTYLE = -20
-WS_EX_APPWINDOW = 0x00040000
-WS_EX_TOOLWINDOW = 0x00000080
 WIDTH = 30
 HEIGHT = 15
+REFRESH_RATE = 250
 
-cp = '$'
 client = discord.Client()
-username = None
-password = None
+config = configparser.ConfigParser()
+if not os.path.isfile("config.ini"):
+    copyfile("default.ini", "config.ini")
+config.read("config.ini")
+username = config['LoginInfo']['Username']
+password = config['LoginInfo']['Password']
 root = None
 Canvas = None
 connected_ind = None
 muted_ind = None
+threads = {}
 
 
 @client.event
@@ -32,17 +42,6 @@ async def on_ready():
     print(client.user.id)
     print('------')
 
-
-def set_appwindow(root):
-    '''Keeps the overlay on top'''
-    hwnd = windll.user32.GetParent(root.winfo_id())
-    style = windll.user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
-    style = style & ~WS_EX_TOOLWINDOW
-    style = style | WS_EX_APPWINDOW
-    res = windll.user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style)
-    # re-assert the new window style
-    root.wm_withdraw()
-    root.after(10, lambda: root.wm_deiconify())
 
 
 def update_status(root):
@@ -62,18 +61,35 @@ def update_status(root):
                 Canvas.itemconfig(connected_ind, fill='red')
                 Canvas.itemconfig(muted_ind, fill='red')
     Canvas.update_idletasks()
-    root.after(1000, lambda: update_status(root))
+    root.after(REFRESH_RATE, lambda: update_status(root))
+
+def attempt_login(username, password):
+    print("Attempting to log in as {}...".format(username))
+    if threads.get("t_client"):
+        client.logout()
+    t_client = threading.Thread(target=client.run, args=(username, password))
+    t_client.start()
+    threads['t_client'] = t_client
 
 
 def on_exit(_):
+    print("Closing...")
     os._exit(1)
 
 
 def log_in_dialog(_):
-    ld = LoginDialog(root)
+    global username, password
+    ld = LoginDialog(root, "Log in")
     username, password = ld.result
-    t_client = threading.Thread(target=client.run, args=(username, password))
-    t_client.start()
+    if username is None or password is None:
+        return
+    if ld.rememberMe.get():
+        config["LoginInfo"]['Username'] = username
+        config["LoginInfo"]['Password'] = password
+        with open('config.ini', 'w') as cfg:
+            config.write(cfg)
+            print("Login info saved successfully!")
+    attempt_login(username, password)
 
 
 def main():
@@ -81,16 +97,27 @@ def main():
     root = tk.Tk()
     root.wm_title("AppWindow Test")
     root.overrideredirect(True)
-    root.after(10, lambda: set_appwindow(root))
     root.attributes('-topmost', 'true')
     root.resizable(width=False, height=False)
     root.geometry('{}x{}'.format(WIDTH, HEIGHT))
+
+    # Attempt to make the window click-through
+    hwnd = root.winfo_id()
+    lExStyle = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+    lExStyle |= win32con.WS_EX_TRANSPARENT | win32con.WS_EX_LAYERED
+    win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, lExStyle)
+    win32gui.SetLayeredWindowAttributes(hwnd, win32api.RGB(1, 1, 1), 60, win32con.LWA_ALPHA)
+
+    # init canvas
     Canvas = tk.Canvas(root, width=WIDTH, height=HEIGHT, highlightthickness=0)
     Canvas.pack()
     connected_ind = Canvas.create_rectangle(0, HEIGHT, HEIGHT, 0, fill='grey', width=1)
     muted_ind = Canvas.create_rectangle(HEIGHT, WIDTH, WIDTH, 0, fill='grey', width=1)
 
-    root.after(1000, lambda: update_status(root))
+    if username != "None" and password != "None":
+        attempt_login(username, password)
+
+    root.after(REFRESH_RATE, lambda: update_status(root))
 
     menu_options = (('Log in', None, log_in_dialog),)
 
@@ -98,6 +125,7 @@ def main():
 
     t_tray = threading.Thread(target=run_tray_icon)
     t_tray.start()
+    threads['t_tray'] = t_tray
 
     root.mainloop()
 
