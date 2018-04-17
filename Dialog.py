@@ -1,5 +1,6 @@
 from tkinter import *
 
+
 # boilerplate code from http://effbot.org/tkinterbook/tkinter-dialog-windows.htm
 class Dialog(Toplevel):
 
@@ -93,27 +94,3 @@ class Dialog(Toplevel):
 
     def apply(self):
         pass  # override
-
-class LoginDialog(Dialog):
-    result = (None, None)
-
-    def body(self, master):
-        Label(master, text="Username:").grid(row=0)
-        Label(master, text="Password:").grid(row=1)
-        self.rememberMe = BooleanVar()
-
-        self.usr = Entry(master)
-        self.pwd = Entry(master, show="*")
-        self.rememberChk = Checkbutton(master, text="Remember info?", variable=self.rememberMe)
-
-        self.usr.grid(row=0, column=1)
-        self.pwd.grid(row=1, column=1)
-        self.rememberChk.grid(row=2, column=1)
-
-    def validate(self):
-        usr = str(self.usr.get())
-        pwd = str(self.pwd.get())
-
-        self.result = (usr, pwd)
-
-        return 1

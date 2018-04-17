@@ -1,24 +1,25 @@
+import configparser
 import os
 import threading
 import tkinter as tk
-from ctypes import windll
-import configparser
-from shutil import copyfile
-import win32con
 import win32api
+from shutil import copyfile
+from tkinter import Label, BooleanVar, Entry, Checkbutton
+
+import win32con
+
+from Dialog import Dialog
+
 try:
     import winxpgui as win32gui
 except ImportError:
     import win32gui
 
-
 import discord
 
 import SysTrayIcon
-from Dialog import LoginDialog
 
-WIDTH = 30
-HEIGHT = 15
+
 REFRESH_RATE = 250
 
 client = discord.Client()
@@ -26,6 +27,8 @@ config = configparser.ConfigParser()
 if not os.path.isfile("config.ini"):
     copyfile("default.ini", "config.ini")
 config.read("config.ini")
+width = config['Display']['Width']
+height = config['Display']['Height']
 username = config['LoginInfo']['Username']
 password = config['LoginInfo']['Password']
 root = None
@@ -35,13 +38,80 @@ muted_ind = None
 threads = {}
 
 
+class LoginDialog(Dialog):
+    result = (None, None)
+
+    def body(self, master):
+        Label(master, text="Username:").grid(row=0)
+        Label(master, text="Password:").grid(row=1)
+        self.rememberMe = BooleanVar()
+
+        self.usr = Entry(master)
+        self.usr.insert(tk.END, username)
+        self.pwd = Entry(master, show="*")
+        self.pwd.insert(tk.END, password)
+        self.rememberChk = Checkbutton(master, text="Remember info?", variable=self.rememberMe)
+
+        self.usr.grid(row=0, column=1)
+        self.pwd.grid(row=1, column=1)
+        self.rememberChk.grid(row=2, column=1)
+
+    def validate(self):
+        usr = str(self.usr.get())
+        pwd = str(self.pwd.get())
+
+        self.result = (usr, pwd)
+
+        return 1
+
+class SettingsDialog(Dialog):
+
+    def body(self, master):
+        Label(master, text="Height").grid(row=0)
+        Label(master, text="Width").grid(row=1)
+        Label(master, text="OffsetX:").grid(row=2)
+        Label(master, text="OffsetY").grid(row=3)
+
+        self.height = Entry(master)
+        self.height.insert(tk.END, config["Display"]["Height"])
+        self.width = Entry(master)
+        self.width.insert(tk.END, config["Display"]["Width"])
+        self.offx = Entry(master)
+        self.offx.insert(tk.END, config["Display"]["OffsetX"])
+        self.offy = Entry(master)
+        self.offy.insert(tk.END, config["Display"]["OffsetY"])
+
+        self.height.grid(row=0, column=1)
+        self.width.grid(row=1, column=1)
+        self.offx.grid(row=2, column=1)
+        self.offy.grid(row=3, column=1)
+
+    def validate(self):
+        h = str(self.height.get())
+        w = str(self.width.get())
+        offx = str(self.offx.get())
+        offy = str(self.offy.get())
+
+        config["Display"]["Height"] = h
+        config["Display"]["Width"] = w
+        config["Display"]["OffsetX"] = offx
+        config["Display"]["OffsetY"] = offy
+
+        with open('config.ini', 'w') as cfg:
+            config.write(cfg)
+            print("Settings info saved successfully!")
+
+        refresh_settings()
+
+        return 1
+
+
 @client.event
 async def on_ready():
     print('Logged in as')
     print(client.user.name)
     print(client.user.id)
     print('------')
-
 
 
 def update_status(root):
@@ -63,6 +133,7 @@ def update_status(root):
     Canvas.update_idletasks()
     root.after(REFRESH_RATE, lambda: update_status(root))
 
+
 def attempt_login(username, password):
     print("Attempting to log in as {}...".format(username))
     if threads.get("t_client"):
@@ -80,9 +151,9 @@ def on_exit(_):
 def log_in_dialog(_):
     global username, password
     ld = LoginDialog(root, "Log in")
-    username, password = ld.result
-    if username is None or password is None:
+    if not ld.result:
         return
+    username, password = ld.result
     if ld.rememberMe.get():
         config["LoginInfo"]['Username'] = username
         config["LoginInfo"]['Password'] = password
@@ -91,6 +162,15 @@ def log_in_dialog(_):
             print("Login info saved successfully!")
     attempt_login(username, password)
 
+def settings_dialog(_):
+    sd = SettingsDialog(root, "Settings")
+
+
+def refresh_settings():
+    root.geometry('{}x{}'.format(width, height))
+    root.geometry("+{}+{}".format(config["Display"]["OffsetX"], config["Display"]["OffsetY"]))
+    root.update_idletasks()
+
 
 def main():
     global root, Canvas, connected_ind, muted_ind
@@ -98,8 +178,9 @@ def main():
     root.wm_title("AppWindow Test")
     root.overrideredirect(True)
     root.attributes('-topmost', 'true')
-    root.resizable(width=False, height=False)
-    root.geometry('{}x{}'.format(WIDTH, HEIGHT))
+    root.resizable(0, 0)
+    root.geometry('{}x{}'.format(width, height))
+    root.geometry("+{}+{}".format(config["Display"]["OffsetX"], config["Display"]["OffsetY"]))
 
     # Attempt to make the window click-through
     hwnd = root.winfo_id()
@@ -109,17 +190,18 @@ def main():
     win32gui.SetLayeredWindowAttributes(hwnd, win32api.RGB(1, 1, 1), 60, win32con.LWA_ALPHA)
 
     # init canvas
-    Canvas = tk.Canvas(root, width=WIDTH, height=HEIGHT, highlightthickness=0)
+    Canvas = tk.Canvas(root, width=width, height=height, highlightthickness=0)
     Canvas.pack()
-    connected_ind = Canvas.create_rectangle(0, HEIGHT, HEIGHT, 0, fill='grey', width=1)
-    muted_ind = Canvas.create_rectangle(HEIGHT, WIDTH, WIDTH, 0, fill='grey', width=1)
+    connected_ind = Canvas.create_rectangle(0, height, width, 0, fill='grey', width=1)
+    muted_ind = Canvas.create_rectangle(height, width, width, 0, fill='grey', width=1)
 
     if username != "None" and password != "None":
         attempt_login(username, password)
 
     root.after(REFRESH_RATE, lambda: update_status(root))
 
-    menu_options = (('Log in', None, log_in_dialog),)
+    menu_options = (('Log in', None, log_in_dialog),
+                    ('Settings', None, settings_dialog))
 
     def run_tray_icon(): SysTrayIcon.SysTrayIcon('eye.ico', "Minimal Discord Overlay", menu_options, on_quit=on_exit)
 
