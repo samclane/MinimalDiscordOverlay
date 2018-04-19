@@ -19,7 +19,6 @@ import discord
 
 import SysTrayIcon
 
-
 REFRESH_RATE = 250
 
 client = discord.Client()
@@ -32,7 +31,7 @@ height = config['Display']['Height']
 username = config['LoginInfo']['Username']
 password = config['LoginInfo']['Password']
 root = None
-Canvas = None
+canv = None
 connected_ind = None
 muted_ind = None
 threads = {}
@@ -63,6 +62,7 @@ class LoginDialog(Dialog):
         self.result = (usr, pwd)
 
         return 1
+
 
 class SettingsDialog(Dialog):
 
@@ -106,6 +106,26 @@ class SettingsDialog(Dialog):
         return 1
 
 
+# a subclass of Canvas for dealing with resizing of windows
+class ResizingCanvas(tk.Canvas):
+    def __init__(self, parent, **kwargs):
+        tk.Canvas.__init__(self, parent, **kwargs)
+        self.bind("<Configure>", self.on_resize)
+        self.height = self.winfo_reqheight()
+        self.width = self.winfo_reqwidth()
+
+    def on_resize(self, event):
+        # determine the ratio of old width/height to new width/height
+        wscale = float(event.width) / self.width
+        hscale = float(event.height) / self.height
+        self.width = event.width
+        self.height = event.height
+        # resize the canvas
+        self.config(width=self.width, height=self.height)
+        # rescale all the objects tagged with the "all" tag
+        self.scale("all", 0, 0, wscale, hscale)
+
+
 @client.event
 async def on_ready():
     print('Logged in as')
@@ -121,16 +141,16 @@ def update_status(root):
             mem = server.get_member(client.user.id)
             vs = mem.voice
             if vs.voice_channel is not None:
-                Canvas.itemconfig(connected_ind, fill='green')
+                canv.itemconfig(connected_ind, fill='green')
                 if vs.mute or vs.self_mute:
-                    Canvas.itemconfig(muted_ind, fill='red')
+                    canv.itemconfig(muted_ind, fill='red')
                 else:
-                    Canvas.itemconfig(muted_ind, fill='green')
+                    canv.itemconfig(muted_ind, fill='green')
                 break
             else:
-                Canvas.itemconfig(connected_ind, fill='red')
-                Canvas.itemconfig(muted_ind, fill='red')
-    Canvas.update_idletasks()
+                canv.itemconfig(connected_ind, fill='red')
+                canv.itemconfig(muted_ind, fill='red')
+    canv.update_idletasks()
     root.after(REFRESH_RATE, lambda: update_status(root))
 
 
@@ -162,18 +182,22 @@ def log_in_dialog(_):
             print("Login info saved successfully!")
     attempt_login(username, password)
 
+
 def settings_dialog(_):
     sd = SettingsDialog(root, "Settings")
 
 
 def refresh_settings():
+    global width, height
+    width = config['Display']['Width']
+    height = config['Display']['Height']
     root.geometry('{}x{}'.format(width, height))
     root.geometry("+{}+{}".format(config["Display"]["OffsetX"], config["Display"]["OffsetY"]))
     root.update_idletasks()
 
 
 def main():
-    global root, Canvas, connected_ind, muted_ind
+    global root, canv, connected_ind, muted_ind, width, height
     root = tk.Tk()
     root.wm_title("AppWindow Test")
     root.overrideredirect(True)
@@ -189,11 +213,11 @@ def main():
     win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, lExStyle)
     win32gui.SetLayeredWindowAttributes(hwnd, win32api.RGB(1, 1, 1), 60, win32con.LWA_ALPHA)
 
-    # init canvas
-    Canvas = tk.Canvas(root, width=width, height=height, highlightthickness=0)
-    Canvas.pack()
-    connected_ind = Canvas.create_rectangle(0, height, width, 0, fill='grey', width=1)
-    muted_ind = Canvas.create_rectangle(height, width, width, 0, fill='grey', width=1)
+    canv = ResizingCanvas(root, width=width, height=height, highlightthickness=0)
+    canv.pack(fill=tk.BOTH, expand=tk.YES)
+    connected_ind = canv.create_rectangle(0, 0, int(width)/2, height, fill='grey', width=1)
+    muted_ind = canv.create_rectangle(int(width)/2, 0, width, height, fill='grey', width=1)
+    canv.addtag_all("all")
 
     if username != "None" and password != "None":
         attempt_login(username, password)
